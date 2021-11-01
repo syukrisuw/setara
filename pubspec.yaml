@@ -27,9 +27,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
-  shelf: ^1.2.0
-  shelf_router: ^1.0.0
-  shelf_static: ^1.0.0
+  socket_io: ^1.0.1
+  socket_io_client: ^1.0.1
   flutter:
     sdk: flutter
 

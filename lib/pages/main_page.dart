@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart' as shelf_io;
-import 'package:shelf_router/shelf_router.dart' as shelf_router;
-import 'package:shelf_static/shelf_static.dart' as shelf_static;
+import 'package:socket_io/socket_io.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IOClient;
 
 class MainPage extends StatefulWidget {
   const MainPage({Key? key, required this.title}) : super(key: key);
@@ -24,50 +21,12 @@ class MainPage extends StatefulWidget {
   @override
   State<MainPage> createState() => _MainPageState();
 }
-
-Response _helloWorldHandler(Request request) => Response.ok('Hello, World!');
-
-Response _sumHandler(request, String a, String b) {
-  final aNum = int.parse(a);
-  final bNum = int.parse(b);
-  return Response.ok(
-    const JsonEncoder.withIndent(' ')
-        .convert({'a': aNum, 'b': bNum, 'sum': aNum + bNum}),
-    headers: {
-      'content-type': 'application/json',
-      'Cache-Control': 'public, max-age=604800',
-    },
-  );
-}
-
-final _staticHandler =
-    shelf_static.createStaticHandler('./', defaultDocument: 'index.html');
-
-final _router = shelf_router.Router()
-  ..get('/helloworld', _helloWorldHandler)
-  ..get(
-    '/time',
-    (request) => Response.ok(DateTime.now().toUtc().toIso8601String()),
-  )
-  ..get('/sum/<a|[0-9]+>/<b|[0-9]+>', _sumHandler);
-
 class _MainPageState extends State<MainPage> {
-  int _counter = 0;
-  HttpServer? server;
+  Server? ioServer;
   String message ="";
+  String statusMessage = "";
 
   bool isServerCreated = false;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,7 +52,12 @@ class _MainPageState extends State<MainPage> {
               child: Text(isServerCreated? "Server Already Started": "Start Server"),
               onPressed: onBtnSetupServerPressed,
             ),
-            Text(isServerCreated? "Server Info ($message) : Server IP: ${server!.address.toString()} Server Port: ${server!.port.toString()} ":"Server Info :")
+            Text(isServerCreated? "Server Info ($message) : Server IP: ${ioServer!.toString()} Server Port: ${ioServer!.port.toString()} ":"Server Info :"),
+            Text("Status : $statusMessage"),
+            TextButton(
+              child: Text(isServerCreated? "Simulate Client Request": "Server Not Ready"),
+              onPressed: onBtnClientPressed,
+            ),
           ],
         ),
       ),
@@ -103,7 +67,7 @@ class _MainPageState extends State<MainPage> {
 
   void onBtnSetupServerPressed() {
     setupServer().then((value) {
-      if(server != null) {
+      if(ioServer != null) {
         print("Server created");
         isServerCreated = true;
       }
@@ -116,40 +80,57 @@ class _MainPageState extends State<MainPage> {
   Future<void> setupServer() async {
     if (!isServerCreated) {
       try {
-        final port = int.parse(Platform.environment['PORT'] ?? '8080');
+        ioServer = Server();
+        var nsp = ioServer!.of('/some');
+        nsp.on('connection', (client) {
+          print('connection /some');
+          client.on('msg', (data) {
+            print('data from /some => $data');
 
-        // See https://pub.dev/documentation/shelf/latest/shelf/Cascade-class.html
-        final cascade = Cascade()
-            // First, serve files from the 'public' directory
-            .add(_staticHandler)
-            // If a corresponding file is not found, send requests to a `Router`
-            .add(_router);
+            setState(() {
+              statusMessage = 'data from /some => $data';
+            });
 
-        // See https://pub.dev/documentation/shelf/latest/shelf_io/serve.html
-        server = await shelf_io.serve(
-          // See https://pub.dev/documentation/shelf/latest/shelf/logRequests.html
-          logRequests()
-              // See https://pub.dev/documentation/shelf/latest/shelf/MiddlewareExtensions/addHandler.html
-              .addHandler(cascade.handler),
-          InternetAddress.anyIPv4, // Allows external connections
-          port,
-        );
+            client.emit('fromServer', "ok 2");
+          });
+        });
+        ioServer!.on('connection', (client) {
+          print('connection default namespace');
+          client.on('msg', (data) {
+            print('data from default => $data');
+            setState(() {
+              statusMessage = 'data from default => $data';
+            });
+            client.emit('fromServer', "ok");
+          });
+        });
+        ioServer!.listen(3000);
+        isServerCreated = true;
       } on Exception catch (e){
         message = e.toString();
       }
 
-      if(server!= null) {
-        isServerCreated = true;
-      }
     } else {
       print("Server already running");
     }
-
-
-    print('Serving at http://${server!.address.host}:${server!.port}');
+    print('Serving at http://${ioServer!.toString()}:${ioServer!.port}');
   }
 
   void onError() {
 
+  }
+
+  void onBtnClientPressed() {
+    IOClient.Socket socket = IOClient.io('http://localhost:3000');
+    socket.on('connect', (_) {
+      print('connect');
+      setState(() {
+        message = "connect";
+      });
+      socket.emit('msg', 'test');
+    });
+    socket.on('event', (data) => print(data));
+    socket.on('disconnect', (_) => print('disconnect'));
+    socket.on('fromServer', (_) => print(_));
   }
 }
